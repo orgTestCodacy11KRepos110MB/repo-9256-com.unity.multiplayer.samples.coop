@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Unity.Netcode;
 using UnityEngine;
 
@@ -7,10 +8,14 @@ public class TestPredictedPlayer : NetworkBehaviour
 {
     [SerializeField]
     float m_Speed = 5;
-    public struct PredictedTransform : INetworkSerializable, IEquatable<PredictedTransform>
+
+    public struct PredictedTransform : INetworkSerializable
     {
+        const double PredictedSigma = 0.0001f; // will vary according to your gameplay
+
         public Vector3 Position;
         public Tick TickSent;
+
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref Position);
@@ -19,17 +24,17 @@ public class TestPredictedPlayer : NetworkBehaviour
 
         public bool Equals(PredictedTransform other)
         {
-            return Position.Equals(other.Position) && TickSent.Equals(other.TickSent);
+            return PositionEquals(Position, other.Position);
         }
 
-        public override bool Equals(object obj)
-        {
-            return obj is PredictedTransform other && Equals(other);
-        }
 
-        public override int GetHashCode()
+
+        public static bool PositionEquals(Vector3 lhs, Vector3 rhs)
         {
-            return HashCode.Combine(Position, TickSent);
+            float num1 = lhs.x - rhs.x;
+            float num2 = lhs.y - rhs.y;
+            float num3 = lhs.z - rhs.z;
+            return (double)num1 * (double)num1 + (double)num2 * (double)num2 + (double)num3 * (double)num3 < PredictedSigma; // adapted from Vector3 == operator
         }
     }
 
@@ -59,22 +64,24 @@ public class TestPredictedPlayer : NetworkBehaviour
 
     public struct Tick : INetworkSerializable, IEquatable<Tick>
     {
-        int m_Value;
+        public int Value;
 
         public Tick(int value)
         {
-            m_Value = value;
+            Value = value;
         }
-        public static implicit operator int(Tick d) => d.m_Value;
-        public static implicit operator Tick(int value) => new Tick() { m_Value = value };
+
+        public static implicit operator int(Tick d) => d.Value;
+        public static implicit operator Tick(int value) => new Tick() { Value = value };
+
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
-            serializer.SerializeValue(ref m_Value);
+            serializer.SerializeValue(ref Value);
         }
 
         public bool Equals(Tick other)
         {
-            return m_Value == other.m_Value;
+            return Value == other.Value;
         }
 
         public override bool Equals(object obj)
@@ -84,44 +91,47 @@ public class TestPredictedPlayer : NetworkBehaviour
 
         public override int GetHashCode()
         {
-            return m_Value;
+            return Value;
+        }
+
+        public override string ToString()
+        {
+            return Value.ToString(); // for debug
         }
     }
+
     List<PredictedInput> m_PredictedInputs = new();
     Dictionary<Tick, PredictedTransform> m_PredictedTransforms = new();
+    List<PredictedInput> m_ServerReceivedBufferedInput = new();
+
+    private static Tick CurrentLocalTick => NetworkManager.Singleton.NetworkTickSystem.LocalTime.Tick;
 
     void Awake()
     {
         NetworkManager.Singleton.NetworkTickSystem.Tick += NetworkTick;
-        m_ServerTransform.OnValueChanged += OnTransformValueChanged;
+        m_ServerTransform.OnValueChanged += OnServerTransformValueChanged;
     }
 
     void NetworkTick()
     {
+        DebugPrint("NetworkTick begin");
+
         if (IsClient)
         {
             // check for local inputs
             CheckForLocalInput(out var input);
 
-            // if (IsHost)
-            // {
-            //     // bypass input sending and just move character
-            //     m_ServerReceivedBufferedInput.Add(input);
-            // }
-            // else
-            // {
-                // save inputs in input history
-                m_PredictedInputs.Add(input);
+            // save inputs in input history
+            m_PredictedInputs.Add(input);
 
-                // send inputs
-                SendInputServerRpc(input);
+            // send inputs
+            SendInputServerRpc(input);
 
-                // predict input on local transform
-                var changedTransform = PredictOneTick(input);
+            // predict input on local transform
+            var changedTransform = PredictOneTick(input, CurrentLocalTick);
 
-                // save transform in history
-                m_PredictedTransforms.Add(changedTransform.TickSent, changedTransform);
-            // }
+            // save transform in history
+            m_PredictedTransforms.Add(changedTransform.TickSent, changedTransform);
         }
 
         if (IsServer)
@@ -130,23 +140,24 @@ public class TestPredictedPlayer : NetworkBehaviour
             foreach (var input in m_ServerReceivedBufferedInput) // TODO this is not secure and could allow cheating
             {
                 var changedTransform = m_ServerTransform.Value;
-                MoveTick(input, ref changedTransform, this);
+                MoveTick(input, ref changedTransform, this, CurrentLocalTick);
 
                 m_ServerTransform.Value = changedTransform; // TODO don't change tick value if rest is not changed?
             }
+
             m_ServerReceivedBufferedInput.Clear();
         }
+        DebugPrint("NetworkTick end");
     }
 
-    PredictedTransform PredictOneTick(PredictedInput input)
+    PredictedTransform PredictOneTick(PredictedInput input, Tick tick)
     {
         var changedTransform = new PredictedTransform() { Position = transform.position };
-        MoveTick(input, ref changedTransform, this);
+        MoveTick(input, ref changedTransform, this, tick);
         transform.position = changedTransform.Position;
         return changedTransform;
     }
 
-    List<PredictedInput> m_ServerReceivedBufferedInput = new();
     [ServerRpc]
     void SendInputServerRpc(PredictedInput input)
     {
@@ -162,16 +173,19 @@ public class TestPredictedPlayer : NetworkBehaviour
             input.isSet = true;
             input.Forward = true;
         }
+
         if (Input.GetKey(KeyCode.S))
         {
             input.isSet = true;
             input.Backward = true;
         }
+
         if (Input.GetKey(KeyCode.A))
         {
             input.isSet = true;
             input.StraffLeft = true;
         }
+
         if (Input.GetKey(KeyCode.D))
         {
             input.isSet = true;
@@ -179,14 +193,35 @@ public class TestPredictedPlayer : NetworkBehaviour
         }
     }
 
-    void OnTransformValueChanged(PredictedTransform previousValue, PredictedTransform newValue)
+    void DebugPrint(string context)
     {
+        var toPrint = context + "\n PredictedInputs: ";
+        foreach (var input in m_PredictedInputs)
+        {
+            toPrint += $"{input.TickSent} ";
+        }
+
+        toPrint += "\nPredictedTransforms: ";
+        var sorted = m_PredictedTransforms.Values.ToArray().OrderBy(predictedTransform => predictedTransform.TickSent.Value);
+        foreach (var predictedTransform in sorted)
+        {
+            toPrint += $"{predictedTransform.TickSent} ";
+        }
+
+        toPrint += $"\n current tick: {CurrentLocalTick}";
+        toPrint += $"\n last tick received: {m_ServerTransform.Value.TickSent}";
+        Debug.Log(toPrint);
+    }
+
+    void OnServerTransformValueChanged(PredictedTransform previousValue, PredictedTransform newValue)
+    {
+        var beforePosition = transform.position; // debug;
         // mispredicted?
+        DebugPrint("OnServerTransformValueChanged begin");
         var foundInHistory = m_PredictedTransforms.TryGetValue(newValue.TickSent, out var historyTransform);
         if (!(foundInHistory && newValue.Equals(historyTransform)))
         {
             // if mispredicted, correct
-            // correction:
             // replace transform with newValue // todo issue with physics? stop physics for that operation?
             transform.position = newValue.Position;
 
@@ -196,11 +231,14 @@ public class TestPredictedPlayer : NetworkBehaviour
                 var oneTick = oneInputFromHistory.TickSent;
                 if (oneTick > newValue.TickSent) // TODO there has to be something more efficient than this
                 {
-                    var newTransform = PredictOneTick(oneInputFromHistory);
+                    var newTransform = PredictOneTick(oneInputFromHistory, oneTick);
                     m_PredictedTransforms[oneTick] = newTransform;
                 }
             }
         }
+
+        DebugPrint("OnServerTransformValueChanged before history clean");
+
         // clear history for acked transforms and inputs
         for (var i = m_PredictedInputs.Count - 1; i >= 0; i--)
         {
@@ -211,9 +249,14 @@ public class TestPredictedPlayer : NetworkBehaviour
                 m_PredictedTransforms.Remove(tickToRemove);
             }
         }
+        DebugPrint("OnServerTransformValueChanged end");
+        if (beforePosition != transform.position)
+        {
+            Debug.Log("moved");
+        }
     }
 
-    static void MoveTick(PredictedInput input, ref PredictedTransform transform, TestPredictedPlayer self)
+    static void MoveTick(PredictedInput input, ref PredictedTransform transform, TestPredictedPlayer self, Tick tick)
     {
         // todo issues with sound? with physics?
         var newPos = transform.Position;
@@ -240,11 +283,8 @@ public class TestPredictedPlayer : NetworkBehaviour
         }
 
         transform.Position = newPos;
-        transform.TickSent = GetLocalTick();
+        transform.TickSent = tick;
     }
 
-    private static Tick GetLocalTick()
-    {
-        return NetworkManager.Singleton.NetworkTickSystem.LocalTime.Tick;
-    }
+
 }
