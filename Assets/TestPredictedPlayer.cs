@@ -60,8 +60,6 @@ public class TestPredictedPlayer : NetworkBehaviour
         }
     }
 
-    NetworkVariable<PredictedTransform> m_ServerTransform = new(); // always late by x ms. GameObject's transform.position contains predicted value
-
     public struct Tick : INetworkSerializable, IEquatable<Tick>
     {
         public int Value;
@@ -100,6 +98,7 @@ public class TestPredictedPlayer : NetworkBehaviour
         }
     }
 
+    NetworkVariable<PredictedTransform> m_ServerTransform = new(); // always late by x ms. GameObject's transform.position contains predicted value
     List<PredictedInput> m_PredictedInputs = new();
     Dictionary<Tick, PredictedTransform> m_PredictedTransforms = new();
     List<PredictedInput> m_ServerReceivedBufferedInput = new();
@@ -109,14 +108,25 @@ public class TestPredictedPlayer : NetworkBehaviour
     void Awake()
     {
         NetworkManager.Singleton.NetworkTickSystem.Tick += NetworkTick;
-        m_ServerTransform.OnValueChanged += OnServerTransformValueChanged;
+    }
+
+    public override void OnNetworkSpawn()
+    {
+        if (IsOwner)
+        {
+            m_ServerTransform.OnValueChanged += CheckForCorrection;
+        }
+        else if(IsClient)
+        {
+            m_ServerTransform.OnValueChanged += GhostTransformChanged;
+        }
     }
 
     void NetworkTick()
     {
         DebugPrint("NetworkTick begin");
 
-        if (IsClient)
+        if (IsClient && IsOwner)
         {
             // check for local inputs
             CheckForLocalInput(out var input);
@@ -214,7 +224,13 @@ public class TestPredictedPlayer : NetworkBehaviour
         Debug.Log(toPrint);
     }
 
-    void OnServerTransformValueChanged(PredictedTransform previousValue, PredictedTransform newValue)
+    void GhostTransformChanged(PredictedTransform previousValue, PredictedTransform newValue)
+    {
+        // todo interpolate
+        transform.position = newValue.Position;
+    }
+
+    void CheckForCorrection(PredictedTransform previousValue, PredictedTransform newValue)
     {
         var beforePosition = transform.position; // debug;
         // mispredicted?
