@@ -140,7 +140,8 @@ public class TestPredictedPlayer : NetworkBehaviour
             foreach (var input in m_ServerReceivedBufferedInput) // TODO this is not secure and could allow cheating
             {
                 var changedTransform = m_ServerTransform.Value;
-                MoveTick(input, ref changedTransform, this, CurrentLocalTick);
+                MoveTick(input, ref changedTransform, this, input.TickSent); // TODO should use currentTick and not input's tick, but I keep getting small mispredictions if I do
+                // MoveTick(input, ref changedTransform, this, CurrentLocalTick);
 
                 m_ServerTransform.Value = changedTransform; // TODO don't change tick value if rest is not changed?
             }
@@ -221,6 +222,7 @@ public class TestPredictedPlayer : NetworkBehaviour
         var foundInHistory = m_PredictedTransforms.TryGetValue(newValue.TickSent, out var historyTransform);
         if (!(foundInHistory && newValue.Equals(historyTransform)))
         {
+            Debug.Log($"mispredicted! found?{foundInHistory} newValue:{newValue.Position} historyTransform:{historyTransform.Position}");
             // if mispredicted, correct
             // replace transform with newValue // todo issue with physics? stop physics for that operation?
             transform.position = newValue.Position;
