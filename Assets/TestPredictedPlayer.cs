@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Unity.Netcode;
@@ -9,25 +10,38 @@ public class TestPredictedPlayer : NetworkBehaviour
     [SerializeField]
     float m_Speed = 5;
 
+    [SerializeField]
+    int m_StunDurationTicks = 60;
+
     public struct PredictedTransform : INetworkSerializable
     {
         const double PredictedSigma = 0.0001f; // will vary according to your gameplay
 
         public Vector3 Position;
         public Tick TickSent;
+        private int StunStopTick;
+
+        public bool IsStunned(Tick currentTick)
+        {
+            return currentTick < StunStopTick;
+        }
+
+        public void Stun(int ticksToStun, Tick currentTick)
+        {
+            StunStopTick = currentTick + ticksToStun;
+        }
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
         {
             serializer.SerializeValue(ref Position);
             serializer.SerializeValue(ref TickSent);
+            serializer.SerializeValue(ref StunStopTick);
         }
 
         public bool Equals(PredictedTransform other)
         {
             return PositionEquals(Position, other.Position);
         }
-
-
 
         public static bool PositionEquals(Vector3 lhs, Vector3 rhs)
         {
@@ -47,6 +61,8 @@ public class TestPredictedPlayer : NetworkBehaviour
         public bool StraffRight;
         public bool isSet; // was there any inputs for that tick
 
+        public bool MouseClick;
+
         public Tick TickSent;
 
         public void NetworkSerialize<T>(BufferSerializer<T> serializer) where T : IReaderWriter
@@ -57,6 +73,7 @@ public class TestPredictedPlayer : NetworkBehaviour
             serializer.SerializeValue(ref StraffRight);
             serializer.SerializeValue(ref isSet);
             serializer.SerializeValue(ref TickSent);
+            serializer.SerializeValue(ref MouseClick);
         }
     }
 
@@ -108,17 +125,38 @@ public class TestPredictedPlayer : NetworkBehaviour
     void Awake()
     {
         NetworkManager.Singleton.NetworkTickSystem.Tick += NetworkTick;
+
+
     }
 
     public override void OnNetworkSpawn()
     {
-        if (IsOwner)
+        if (IsClient)
         {
-            m_ServerTransform.OnValueChanged += CheckForCorrection;
+            if (IsOwner)
+            {
+                m_ServerTransform.OnValueChanged += CheckForCorrection;
+            }
+            else
+            {
+                m_ServerTransform.OnValueChanged += GhostTransformChanged;
+            }
         }
-        else if(IsClient)
+
+        if (IsServer)
         {
-            m_ServerTransform.OnValueChanged += GhostTransformChanged;
+            // TODO would have been great to get some tool to help here, to control multiple clients
+            IEnumerator DebugStunEveryXSeconds()
+            {
+                while (true)
+                {
+                    yield return new WaitForSeconds(5);
+                    var t = m_ServerTransform.Value;
+                    t.Stun(m_StunDurationTicks, CurrentLocalTick); // todo this should cause a misprediction...
+                    m_ServerTransform.Value = t;
+                }
+            }
+            StartCoroutine(DebugStunEveryXSeconds()); // debug
         }
     }
 
@@ -150,8 +188,11 @@ public class TestPredictedPlayer : NetworkBehaviour
             foreach (var input in m_ServerReceivedBufferedInput) // TODO this is not secure and could allow cheating
             {
                 var changedTransform = m_ServerTransform.Value;
-                MoveTick(input, ref changedTransform, this, input.TickSent); // TODO should use currentTick and not input's tick, but I keep getting small mispredictions if I do
-                // MoveTick(input, ref changedTransform, this, CurrentLocalTick);
+                var currentTick = input.TickSent;
+                // var currentTick = CurrentLocalTick; // TODO should use currentTick and not input's tick, but I keep getting small mispredictions if I do
+
+                MoveTick(input, ref changedTransform, this, currentTick);
+                AbilityTick(input, this, currentTick); // not predicted
 
                 m_ServerTransform.Value = changedTransform; // TODO don't change tick value if rest is not changed?
             }
@@ -181,31 +222,33 @@ public class TestPredictedPlayer : NetworkBehaviour
         input.TickSent = NetworkManager.Singleton.NetworkTickSystem.LocalTime.Tick;
         if (Input.GetKey(KeyCode.W))
         {
-            input.isSet = true;
-            input.Forward = true;
+            input.Forward = input.isSet = true;
         }
 
         if (Input.GetKey(KeyCode.S))
         {
-            input.isSet = true;
-            input.Backward = true;
+            input.Backward = input.isSet = true;
         }
 
         if (Input.GetKey(KeyCode.A))
         {
-            input.isSet = true;
-            input.StraffLeft = true;
+            input.StraffLeft = input.isSet = true;
         }
 
         if (Input.GetKey(KeyCode.D))
         {
-            input.isSet = true;
-            input.StraffRight = true;
+            input.StraffRight = input.isSet = true;
+        }
+
+        if (Input.GetKey(KeyCode.Mouse0))
+        {
+            input.MouseClick = input.isSet = true;
         }
     }
 
     void DebugPrint(string context)
     {
+        return;
         var toPrint = context + "\n PredictedInputs: ";
         foreach (var input in m_PredictedInputs)
         {
@@ -280,29 +323,65 @@ public class TestPredictedPlayer : NetworkBehaviour
         var newPos = transform.Position;
         var deltaTime = 1f / NetworkManager.Singleton.NetworkTickSystem.TickRate;
 
-        if (input.Forward)
+        if (!transform.IsStunned(tick))
         {
-            newPos.z = newPos.z + self.m_Speed * deltaTime;
-        }
+            if (input.Forward)
+            {
+                newPos.z = newPos.z + self.m_Speed * deltaTime;
+            }
 
-        if (input.Backward)
-        {
-            newPos.z = newPos.z - self.m_Speed * deltaTime;
-        }
+            if (input.Backward)
+            {
+                newPos.z = newPos.z - self.m_Speed * deltaTime;
+            }
 
-        if (input.StraffLeft)
-        {
-            newPos.x = newPos.x - self.m_Speed * deltaTime;
-        }
+            if (input.StraffLeft)
+            {
+                newPos.x = newPos.x - self.m_Speed * deltaTime;
+            }
 
-        if (input.StraffRight)
+            if (input.StraffRight)
+            {
+                newPos.x = newPos.x + self.m_Speed * deltaTime;
+            }
+        }
+        else
         {
-            newPos.x = newPos.x + self.m_Speed * deltaTime;
+            Debug.Log("can't move, is stunned");
         }
 
         transform.Position = newPos;
         transform.TickSent = tick;
     }
 
+    TestPredictedPlayer m_OtherPlayer;
 
+    TestPredictedPlayer OtherPlayer
+    {
+        get
+        {
+            if (m_OtherPlayer == null)
+            {
+                foreach (var player in FindObjectsOfType<TestPredictedPlayer>())
+                {
+                    if (player != this)
+                    {
+                        m_OtherPlayer = player;
+                    }
+                }
+            }
+
+            return m_OtherPlayer;
+        }
+    }
+
+    void AbilityTick(PredictedInput input, TestPredictedPlayer self, Tick currentTick)
+    {
+        if (input.MouseClick && !self.m_ServerTransform.Value.IsStunned(currentTick)) // not predicting this
+        {
+            var otherTransform = OtherPlayer.m_ServerTransform.Value;
+            otherTransform.Stun(m_StunDurationTicks, currentTick);
+            OtherPlayer.m_ServerTransform.Value = otherTransform;
+        }
+    }
 }
