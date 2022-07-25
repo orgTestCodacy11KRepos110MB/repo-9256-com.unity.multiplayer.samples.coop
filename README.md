@@ -1,4 +1,18 @@
 ![Banner](Documentation/Images/Banner.png)
+
+<link rel="stylesheet" href="mystyle.css">
+<div class="badge">
+  <div class="name">
+    <span>
+      Supported Unity Version
+    </span>
+  </div>
+  <div class="status green">
+    <span>
+      2021 LTS
+    </span>
+  </div>
+</div>
 # Boss Room - Co-op multiplayer RPG built with Unity Netcode for GameObjects
 
 | Solutions architects are available on [Discord](https://discord.gg/mNgM2XRDpb) and [forums](https://forum.unity.com/forums/multiplayer.26/) to help you work through issues you may encounter when using Boss Room. |
