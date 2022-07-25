@@ -1,6 +1,5 @@
-![Banner](Documentation/Images/Banner.png)
 
-<link rel="stylesheet" href="mystyle.css">
+<link rel="stylesheet" href="Documentation/style/badge.css">
 <div class="badge">
   <div class="name">
     <span>
@@ -13,6 +12,9 @@
     </span>
   </div>
 </div>
+
+![Banner](Documentation/Images/Banner.png)
+
 # Boss Room - Co-op multiplayer RPG built with Unity Netcode for GameObjects
 
 | Solutions architects are available on [Discord](https://discord.gg/mNgM2XRDpb) and [forums](https://forum.unity.com/forums/multiplayer.26/) to help you work through issues you may encounter when using Boss Room. |
