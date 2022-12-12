@@ -12,7 +12,10 @@ namespace Unity.BossRoom.Utils
 
         void Awake()
         {
-            m_Collider.enabled = m_EnableStateOnAwake;
+            if (m_Collider != null) // tmp, do not commit!!!!!!
+            {
+                m_Collider.enabled = m_EnableStateOnAwake;
+            }
         }
     }
 }
