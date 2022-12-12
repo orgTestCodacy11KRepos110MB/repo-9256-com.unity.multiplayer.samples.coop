@@ -1,0 +1,75 @@
+<HTML>
+<body>
+Game run time: <span id=gameRunTime></span>
+<button onclick="sendSomething()">EWQ</button>
+<div id="result"></div>
+<script>
+// SSE examples
+var source = new EventSource("/SSE");
+source.onmessage = function(event) {
+  document.getElementById("result").innerHTML += event.data + "<br>";
+};
+source.onopen = function(event) {
+  document.getElementById("result").innerHTML += "connection opened";
+}
+source.onerror = function(event) {
+  console.log("error with SSE, closing"+event);
+  source.close();
+}
+
+/*
+            alert("before start")
+            let socket = new WebSocket("ws://192.168.0.106:9000");
+            socket.binaryType = "arraybuffer";
+            function sendSomething() {
+                var arrayLength = 2;
+                var nbBytesInType = 4;
+                buffer = new ArrayBuffer(nbBytesInType * arrayLength);
+                var offset = 0;
+                const myInt32 = new Int32Array(buffer, offset, arrayLength);
+                myInt32[0] = 1
+                myInt32[1] = 2
+//
+                socket.send(myInt32);
+            }
+
+            socket.onopen = function(e) {
+                alert("[open] Connection established");
+            };
+
+            socket.onmessage = function(event) {
+                alert(`[message] Data received from server: ${event.data}`);
+            };
+
+            socket.onclose = function(event) {
+                if (event.wasClean) {
+                    alert(`[close] Connection closed cleanly, code=${event.code} reason=${event.reason}`);
+                } else {
+                    // e.g. server process killed or network down
+                    // event.code is usually 1006 in this case
+                    alert('[close] Connection died');
+                }
+            };
+
+            socket.onerror = function(error) {
+                alert(`[error] ${error.message}`);
+            };
+//*/
+/*
+            setInterval(() => {
+                console.log("checking status")
+                const Http = new XMLHttpRequest();
+                const url='/status';
+                Http.open("GET", url);
+                Http.send();
+                Http.onreadystatechange = (e) => {
+                    var elem = document.getElementById("gameRunTime");
+                    elem.innerHTML = Http.responseText;
+                    // console.log(Http.responseText)
+                }
+            }, 1000);
+//*/
+
+        </script>
+</body>
+</HTML>
