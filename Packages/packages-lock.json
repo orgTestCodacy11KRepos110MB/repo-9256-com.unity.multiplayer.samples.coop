@@ -124,8 +124,9 @@
       "dependencies": {
         "com.unity.learn.iet-framework": "1.2.1",
         "com.unity.multiplayer.tools": "1.1.0",
-        "com.unity.netcode.gameobjects": "1.1.0",
-        "com.unity.services.relay": "1.0.3"
+        "com.unity.netcode.gameobjects": "1.2.0",
+        "com.unity.services.relay": "1.0.3",
+        "com.unity.modules.physics": "1.0.0"
       }
     },
     "com.unity.multiplayer.tools": {
